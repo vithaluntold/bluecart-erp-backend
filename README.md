@@ -1,131 +1,258 @@
-# FastAPI Backend README
+# BlueCart ERP Backend# FastAPI Backend README
 
-## 🚀 BlueCart ERP FastAPI Backend
 
-A high-performance Python backend built with FastAPI for the BlueCart ERP system.
 
-### 📋 Features
+A FastAPI-based backend for the BlueCart ERP logistics management system.## 🚀 BlueCart ERP FastAPI Backend
 
-- **FastAPI Framework**: Modern, fast web framework for building APIs
-- **PostgreSQL Integration**: Full database support with SQLAlchemy ORM
-- **JWT Authentication**: Secure user authentication and authorization
-- **Automatic API Documentation**: Interactive docs at `/docs` and `/redoc`
+
+
+## FeaturesA high-performance Python backend built with FastAPI for the BlueCart ERP system.
+
+
+
+- 🚀 FastAPI with async support### 📋 Features
+
+- 👤 User management and authentication
+
+- 📦 Shipment tracking and management- **FastAPI Framework**: Modern, fast web framework for building APIs
+
+- 🏢 Hub and route management- **PostgreSQL Integration**: Full database support with SQLAlchemy ORM
+
+- 📊 Analytics and dashboard APIs- **JWT Authentication**: Secure user authentication and authorization
+
+- 🔒 Role-based access control- **Automatic API Documentation**: Interactive docs at `/docs` and `/redoc`
+
 - **Docker Support**: Complete containerization with Docker Compose
-- **Comprehensive Testing**: Full test suite with pytest
+
+## Project Structure- **Comprehensive Testing**: Full test suite with pytest
+
 - **Input Validation**: Pydantic schemas for data validation
-- **CORS Support**: Ready for frontend integration
 
-### 🛠️ Tech Stack
+```- **CORS Support**: Ready for frontend integration
 
-- **Framework**: FastAPI 0.104.1
-- **Database**: PostgreSQL with SQLAlchemy 2.0
-- **Authentication**: JWT with python-jose
-- **Validation**: Pydantic v2
-- **Testing**: pytest with httpx
-- **Deployment**: Docker & Docker Compose
+bluecart-backend/
 
-### 📁 Project Structure
+├── main.py              # Main FastAPI application### 🛠️ Tech Stack
 
-```
-backend/
+├── main_postgres.py     # PostgreSQL version
+
+├── auth.py              # Authentication handlers- **Framework**: FastAPI 0.104.1
+
+├── crud.py              # Database operations- **Database**: PostgreSQL with SQLAlchemy 2.0
+
+├── database.py          # Database configuration- **Authentication**: JWT with python-jose
+
+├── models.py            # Data models- **Validation**: Pydantic v2
+
+├── schemas.py           # Pydantic schemas- **Testing**: pytest with httpx
+
+├── requirements.txt     # Python dependencies- **Deployment**: Docker & Docker Compose
+
+├── Dockerfile          # Docker configuration
+
+├── docker-compose.yml  # Docker Compose setup### 📁 Project Structure
+
+├── Procfile           # Deployment config
+
+└── tests/             # Test files```
+
+```backend/
+
 ├── main.py              # FastAPI application entry point
-├── models.py            # SQLAlchemy database models
+
+## Quick Start├── models.py            # SQLAlchemy database models
+
 ├── schemas.py           # Pydantic schemas for validation
-├── crud.py              # Database operations
-├── database.py          # Database connection and setup
-├── auth.py              # Authentication and authorization
-├── requirements.txt     # Python dependencies
+
+1. **Install dependencies:**├── crud.py              # Database operations
+
+   ```bash├── database.py          # Database connection and setup
+
+   pip install -r requirements.txt├── auth.py              # Authentication and authorization
+
+   ```├── requirements.txt     # Python dependencies
+
 ├── Dockerfile           # Docker configuration
-├── docker-compose.yml   # Multi-container setup
-├── .env                 # Environment variables
-├── test_api.py          # API tests
-└── setup.py             # Setup and testing script
+
+2. **Run the development server:**├── docker-compose.yml   # Multi-container setup
+
+   ```bash├── .env                 # Environment variables
+
+   python main.py├── test_api.py          # API tests
+
+   ```└── setup.py             # Setup and testing script
+
 ```
 
-### 🚀 Quick Start
+3. **Access the API:**
 
-#### Option 1: Python Virtual Environment
+   - API: http://localhost:8000### 🚀 Quick Start
 
-1. **Create and activate virtual environment**:
+   - Documentation: http://localhost:8000/docs
+
+   - Interactive API: http://localhost:8000/redoc#### Option 1: Python Virtual Environment
+
+
+
+## API Endpoints1. **Create and activate virtual environment**:
+
    ```bash
-   cd backend
-   python -m venv venv
-   
+
+### Core Endpoints   cd backend
+
+- `GET /health` - Health check   python -m venv venv
+
+- `GET /` - Root endpoint   
+
    # Windows
-   venv\Scripts\activate
-   
-   # Linux/Mac
-   source venv/bin/activate
-   ```
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Shipments   venv\Scripts\activate
+
+- `POST /api/shipments` - Create shipment   
+
+- `GET /api/shipments` - List shipments   # Linux/Mac
+
+- `GET /api/shipments/{id}` - Get shipment details   source venv/bin/activate
+
+- `PUT /api/shipments/{id}` - Update shipment   ```
+
+
+
+### Users2. **Install dependencies**:
+
+- `POST /api/users` - Create user   ```bash
+
+- `GET /api/users` - List users   pip install -r requirements.txt
+
+- `GET /api/users/{id}` - Get user details   ```
+
+- `PUT /api/users/{id}` - Update user
 
 3. **Set up environment variables**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your database credentials
+
+### Hubs   ```bash
+
+- `GET /api/hubs` - List hubs   cp .env.example .env
+
+- `GET /api/hubs/{id}` - Get hub details   # Edit .env with your database credentials
+
    ```
 
-4. **Run setup script**:
-   ```bash
-   python setup.py
+### Routes
+
+- `POST /api/routes` - Create route4. **Run setup script**:
+
+- `GET /api/routes` - List routes   ```bash
+
+- `GET /api/routes/{id}` - Get route details   python setup.py
+
    ```
 
-#### Option 2: Docker (Recommended)
+### Analytics
 
-1. **Start all services**:
+- `GET /api/analytics/dashboard` - Dashboard metrics#### Option 2: Docker (Recommended)
+
+
+
+## Environment Variables1. **Start all services**:
+
    ```bash
-   cd backend
+
+Create a `.env` file:   cd backend
+
    docker-compose up -d
-   ```
 
-2. **Access services**:
-   - API: http://localhost:8000
+```   ```
+
+DATABASE_URL=your_database_url
+
+SECRET_KEY=your_secret_key2. **Access services**:
+
+```   - API: http://localhost:8000
+
    - API Docs: http://localhost:8000/docs
-   - pgAdmin: http://localhost:5050 (admin@bluecart.com / admin123)
 
-### 📊 API Endpoints
+## Deployment   - pgAdmin: http://localhost:5050 (admin@bluecart.com / admin123)
 
-#### Health & Status
-- `GET /` - Basic health check
-- `GET /health` - Detailed health information
 
-#### Shipments
-- `POST /api/shipments` - Create new shipment
-- `GET /api/shipments` - List all shipments (with pagination)
+
+### Docker### 📊 API Endpoints
+
+```bash
+
+docker build -t bluecart-backend .#### Health & Status
+
+docker run -p 8000:8000 bluecart-backend- `GET /` - Basic health check
+
+```- `GET /health` - Detailed health information
+
+
+
+### Render/Heroku#### Shipments
+
+- Uses `Procfile` for deployment- `POST /api/shipments` - Create new shipment
+
+- Set environment variables in platform- `GET /api/shipments` - List all shipments (with pagination)
+
 - `GET /api/shipments/{id}` - Get shipment by ID/tracking number
-- `PUT /api/shipments/{id}` - Update shipment
-- `DELETE /api/shipments/{id}` - Delete shipment
-- `POST /api/shipments/{id}/events` - Add event to shipment
 
-#### Analytics
-- `GET /api/analytics/dashboard` - Get dashboard statistics
+## Development- `PUT /api/shipments/{id}` - Update shipment
+
+- `DELETE /api/shipments/{id}` - Delete shipment
+
+1. **Set up virtual environment:**- `POST /api/shipments/{id}/events` - Add event to shipment
+
+   ```bash
+
+   python -m venv .venv#### Analytics
+
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate- `GET /api/analytics/dashboard` - Get dashboard statistics
+
+   ```
 
 ### 💡 API Usage Examples
 
-#### Create a Shipment
-```bash
-curl -X POST "http://localhost:8000/api/shipments" \
+2. **Install development dependencies:**
+
+   ```bash#### Create a Shipment
+
+   pip install -r requirements.txt```bash
+
+   ```curl -X POST "http://localhost:8000/api/shipments" \
+
   -H "Content-Type: application/json" \
-  -d '{
-    "sender_name": "John Doe",
-    "sender_address": "123 Main St, City, State 12345",
-    "receiver_name": "Jane Smith",
+
+3. **Run tests:**  -d '{
+
+   ```bash    "sender_name": "John Doe",
+
+   python -m pytest    "sender_address": "123 Main St, City, State 12345",
+
+   ```    "receiver_name": "Jane Smith",
+
     "receiver_address": "456 Oak Ave, City, State 67890",
-    "package_details": "Electronics - Laptop",
+
+## Contributing    "package_details": "Electronics - Laptop",
+
     "weight": 2.5,
-    "dimensions": {
-      "length": 40.0,
-      "width": 30.0,
-      "height": 5.0
-    },
+
+1. Fork the repository    "dimensions": {
+
+2. Create a feature branch      "length": 40.0,
+
+3. Make your changes      "width": 30.0,
+
+4. Add tests      "height": 5.0
+
+5. Submit a pull request    },
+
     "service_type": "express",
-    "cost": 25.99
+
+## License    "cost": 25.99
+
   }'
-```
+
+MIT License```
 
 #### Get All Shipments
 ```bash
