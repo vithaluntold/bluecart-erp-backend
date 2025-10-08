@@ -17,9 +17,14 @@ app = FastAPI(
 )
 
 # CORS middleware for frontend integration
+import os
+
+# Get allowed origins from environment variable or use defaults
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,https://bluecart-erp-frontend.onrender.com").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:3003", "http://localhost:3004"],  # Next.js frontend
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -951,10 +956,13 @@ if __name__ == "__main__":
     # Initialize test data
     initialize_test_data()
     
+    # Get port from environment variable (for Render deployment) or default to 8000
+    port = int(os.getenv("PORT", 8000))
+    
     uvicorn.run(
-        "main_simple:app",
+        "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=False,  # Disable reload in production
         log_level="info"
     )
