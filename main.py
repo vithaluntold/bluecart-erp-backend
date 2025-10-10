@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import uvicorn
 from pydantic import BaseModel, Field
 import random
@@ -20,7 +20,7 @@ app = FastAPI(
 import os
 
 # Get allowed origins from environment variable or use defaults
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,https://bluecart-erp-frontend.onrender.com").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005,https://bluecart-erp-frontend.onrender.com").split(",")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,6 +41,7 @@ shipments_db: Dict[str, Dict] = {}
 hubs_db: Dict[str, Dict] = {}
 routes_db: Dict[str, Dict] = {}
 users_db: Dict[str, Dict] = {}
+sessions_db: Dict[str, Dict] = {}
 
 # Pydantic models
 class Dimensions(BaseModel):
@@ -64,24 +65,24 @@ class ShipmentCreate(BaseModel):
 class ShipmentResponse(BaseModel):
     id: str
     trackingNumber: str
-    senderName: str
-    senderPhone: Optional[str]
-    senderAddress: str
-    receiverName: str
-    receiverPhone: Optional[str]
-    receiverAddress: str
-    packageDetails: str
-    weight: float
-    dimensions: Dict[str, float]
-    serviceType: str
-    status: str
-    pickupDate: Optional[str]
-    estimatedDelivery: Optional[str]
-    actualDelivery: Optional[str]
-    route: Optional[str]
-    hubId: Optional[str]
-    events: List[Dict[str, Any]]
-    cost: float
+    senderName: Optional[str] = None
+    senderPhone: Optional[str] = None
+    senderAddress: Optional[str] = None
+    receiverName: Optional[str] = None
+    receiverPhone: Optional[str] = None
+    receiverAddress: Optional[str] = None
+    packageDetails: Optional[str] = None
+    weight: Optional[float] = None
+    dimensions: Optional[Dict[str, float]] = None
+    serviceType: Optional[str] = "standard"
+    status: str = "pending"
+    pickupDate: Optional[str] = None
+    estimatedDelivery: Optional[str] = None
+    actualDelivery: Optional[str] = None
+    route: Optional[str] = None
+    hubId: Optional[str] = None
+    events: Optional[List[Dict[str, Any]]] = []
+    cost: Optional[float] = None
     createdAt: str
     updatedAt: str
 
@@ -153,6 +154,19 @@ class UserResponse(BaseModel):
     createdAt: str
     updatedAt: str
 
+class UserSession(BaseModel):
+    id: str
+    user_id: str
+    device: str
+    ip_address: str
+    location: str
+    last_activity: str
+    created_at: str
+    is_current: bool
+
+class SessionResponse(BaseModel):
+    sessions: List[UserSession]
+
 class HealthCheck(BaseModel):
     status: str
     message: str
@@ -170,6 +184,9 @@ def generate_route_id():
 
 def generate_user_id():
     return f"USR{int(datetime.now().timestamp())}"
+
+def generate_session_id():
+    return f"SES{int(datetime.now().timestamp())}"
 
 def generate_tracking_number():
     return f"TN{int(datetime.now().timestamp())}"
@@ -779,12 +796,251 @@ async def update_user(user_id: str, user_data: dict):
             detail=f"Failed to update user: {str(e)}"
         )
 
+@app.put("/api/users/{user_id}/preferences")
+async def update_user_preferences(user_id: str, preferences: dict):
+    """Update user notification and other preferences"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for preferences update: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Update user preferences (store in a separate preferences dict or in user record)
+        # For now, we'll store preferences in the user record
+        current_time = datetime.now().isoformat()
+        
+        if "preferences" not in users_db[user_id]:
+            users_db[user_id]["preferences"] = {}
+            
+        users_db[user_id]["preferences"].update(preferences)
+        users_db[user_id]["updatedAt"] = current_time
+        
+        print(f"✅ User preferences updated successfully: {user_id}")
+        return {"message": "Preferences updated successfully", "preferences": users_db[user_id]["preferences"]}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating user preferences: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update preferences: {str(e)}"
+        )
+
+@app.get("/api/users/{user_id}/preferences")
+async def get_user_preferences(user_id: str):
+    """Get user notification and other preferences"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for preferences: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        preferences = users_db[user_id].get("preferences", {})
+        return {"preferences": preferences}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting user preferences: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get preferences: {str(e)}"
+        )
+
+@app.post("/api/users/{user_id}/2fa/setup")
+async def setup_2fa(user_id: str):
+    """Generate 2FA secret and QR code for user"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for 2FA setup: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Generate a secret for the user (in production, use proper TOTP library)
+        # For demo purposes, we'll generate a simple secret
+        import secrets
+        import string
+        
+        secret = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(32))
+        
+        # Store the secret temporarily (in production, store encrypted)
+        if "security" not in users_db[user_id]:
+            users_db[user_id]["security"] = {}
+        
+        users_db[user_id]["security"]["totp_secret"] = secret
+        users_db[user_id]["security"]["totp_enabled"] = False  # Not enabled until verified
+        
+        # Create QR code data (format for authenticator apps)
+        app_name = "BlueCart ERP"
+        user_email = users_db[user_id].get("email", "user@bluecart.com")
+        qr_data = f"otpauth://totp/{app_name}:{user_email}?secret={secret}&issuer={app_name}"
+        
+        print(f"✅ 2FA setup initialized for user: {user_id}")
+        return {
+            "secret": secret,
+            "qr_data": qr_data,
+            "manual_entry_code": f"{secret[:4]}-{secret[4:8]}-{secret[8:12]}-{secret[12:16]}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error setting up 2FA: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to setup 2FA: {str(e)}"
+        )
+
+@app.post("/api/users/{user_id}/2fa/verify")
+async def verify_2fa(user_id: str, verification_data: dict):
+    """Verify TOTP code and enable 2FA"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for 2FA verification: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        code = verification_data.get("code")
+        if not code:
+            raise HTTPException(status_code=400, detail="Verification code required")
+        
+        # In production, verify the TOTP code against the secret
+        # For demo purposes, we'll accept any 6-digit code
+        if len(code) == 6 and code.isdigit():
+            users_db[user_id]["security"]["totp_enabled"] = True
+            
+            print(f"✅ 2FA enabled for user: {user_id}")
+            return {"message": "2FA enabled successfully", "enabled": True}
+        else:
+            raise HTTPException(status_code=400, detail="Invalid verification code")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error verifying 2FA: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to verify 2FA: {str(e)}"
+        )
+
+@app.get("/api/users/{user_id}/2fa/status")
+async def get_2fa_status(user_id: str):
+    """Get 2FA status for user"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for 2FA status: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        security = users_db[user_id].get("security", {})
+        enabled = security.get("totp_enabled", False)
+        
+        return {"enabled": enabled}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting 2FA status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get 2FA status: {str(e)}"
+        )
+
+# Session Management Endpoints
+@app.get("/api/users/{user_id}/sessions", response_model=SessionResponse)
+async def get_user_sessions(user_id: str):
+    """Get all sessions for a user"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for sessions: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get user sessions from sessions_db
+        user_sessions = []
+        for session_id, session_data in sessions_db.items():
+            if session_data.get("user_id") == user_id:
+                user_sessions.append(UserSession(**session_data))
+        
+        return SessionResponse(sessions=user_sessions)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting user sessions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user sessions: {str(e)}"
+        )
+
+@app.post("/api/users/{user_id}/sessions/{session_id}/revoke")
+async def revoke_session(user_id: str, session_id: str):
+    """Revoke a specific session"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for session revoke: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        if session_id not in sessions_db:
+            print(f"❌ Session not found: {session_id}")
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Verify session belongs to user
+        session_data = sessions_db[session_id]
+        if session_data.get("user_id") != user_id:
+            print(f"❌ Session {session_id} does not belong to user {user_id}")
+            raise HTTPException(status_code=403, detail="Session does not belong to user")
+        
+        # Remove session
+        del sessions_db[session_id]
+        print(f"✅ Session revoked: {session_id}")
+        
+        return {"message": "Session revoked successfully", "session_id": session_id}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error revoking session: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to revoke session: {str(e)}"
+        )
+
+@app.post("/api/users/{user_id}/sessions/revoke-all")
+async def revoke_all_sessions(user_id: str):
+    """Revoke all sessions for a user except current"""
+    try:
+        if user_id not in users_db:
+            print(f"❌ User not found for session revoke all: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Find and remove all non-current sessions for the user
+        sessions_to_remove = []
+        for session_id, session_data in sessions_db.items():
+            if session_data.get("user_id") == user_id and not session_data.get("is_current", False):
+                sessions_to_remove.append(session_id)
+        
+        for session_id in sessions_to_remove:
+            del sessions_db[session_id]
+        
+        print(f"✅ Revoked {len(sessions_to_remove)} sessions for user {user_id}")
+        
+        return {
+            "message": f"Revoked {len(sessions_to_remove)} sessions successfully",
+            "revoked_count": len(sessions_to_remove)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error revoking all sessions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to revoke all sessions: {str(e)}"
+        )
+
 @app.get("/api/analytics/dashboard")
 async def get_dashboard_analytics():
-    """Get dashboard analytics data"""
+    """Get enhanced dashboard analytics data with 7-day trends"""
     try:
         total_shipments = len(shipments_db)
         total_hubs = len(hubs_db)
+        total_users = len(users_db)
         
         # Count by status
         status_counts = {}
@@ -795,17 +1051,68 @@ async def get_dashboard_analytics():
             status_counts[status] = status_counts.get(status, 0) + 1
             total_revenue += shipment.get("cost", 0)
         
+        # Generate 7-day trend data
+        daily_data = []
+        revenue_data = []
+        current_date = datetime.now()
+        
+        for day_offset in range(6, -1, -1):  # Last 7 days
+            day_date = current_date - timedelta(days=day_offset)
+            day_str = day_date.strftime("%Y-%m-%d")
+            day_name = day_date.strftime("%a")
+            
+            # Count shipments for this day
+            day_shipments = 0
+            day_revenue = 0
+            day_delivered = 0
+            
+            for shipment in shipments_db.values():
+                shipment_date = shipment.get("createdAt", "")
+                if shipment_date.startswith(day_str):
+                    day_shipments += 1
+                    day_revenue += shipment.get("cost", 0)
+                    if shipment.get("status") == "delivered":
+                        day_delivered += 1
+            
+            daily_data.append({
+                "date": day_str,
+                "day": day_name,
+                "shipments": day_shipments,
+                "delivered": day_delivered,
+                "pending": day_shipments - day_delivered
+            })
+            
+            revenue_data.append({
+                "date": day_str,
+                "day": day_name,
+                "revenue": round(day_revenue, 2)
+            })
+        
+        # Calculate metrics
+        active_hubs = sum(1 for hub in hubs_db.values() if hub.get("status") == "active")
+        driver_count = sum(1 for user in users_db.values() if user.get("role") == "driver")
+        
         return {
             "total_shipments": total_shipments,
+            "active_shipments": status_counts.get("in-transit", 0) + status_counts.get("picked-up", 0),
             "total_hubs": total_hubs,
+            "active_hubs": active_hubs,
+            "total_users": total_users,
+            "driver_count": driver_count,
             "pending_shipments": status_counts.get("pending", 0),
-            "in_transit_shipments": status_counts.get("in_transit", 0),
+            "in_transit_shipments": status_counts.get("in-transit", 0),
             "delivered_shipments": status_counts.get("delivered", 0),
             "failed_shipments": status_counts.get("failed", 0),
             "total_revenue": round(total_revenue, 2),
-            "average_delivery_time": None,
-            "top_routes": [],
-            "daily_shipments": []
+            "daily_shipments": daily_data,
+            "daily_revenue": revenue_data,
+            "status_distribution": [
+                {"status": "Delivered", "count": status_counts.get("delivered", 0), "color": "#22c55e"},
+                {"status": "In Transit", "count": status_counts.get("in-transit", 0), "color": "#8b5cf6"},
+                {"status": "Pending", "count": status_counts.get("pending", 0), "color": "#f59e0b"},
+                {"status": "Out for Delivery", "count": status_counts.get("out-for-delivery", 0), "color": "#f97316"},
+                {"status": "Failed", "count": status_counts.get("failed", 0), "color": "#ef4444"}
+            ]
         }
     except Exception as e:
         print(f"❌ Error getting analytics: {e}")
@@ -813,6 +1120,94 @@ async def get_dashboard_analytics():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve analytics: {str(e)}"
         )
+
+def generate_dynamic_test_data():
+    """Generate 7 days of dynamic test data for analytics and dashboard"""
+    if shipments_db:  # Clear existing if any
+        shipments_db.clear()
+    
+    # Generate shipments for the last 7 days
+    statuses = ["pending", "picked-up", "in-transit", "out-for-delivery", "delivered", "failed"]
+    cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Hyderabad", "Kolkata", "Pune", "Ahmedabad", "Jaipur"]
+    service_types = ["standard", "express", "overnight"]
+    
+    current_date = datetime.now()
+    
+    # Generate varying number of shipments per day (more recent = more shipments)
+    daily_shipment_counts = [15, 18, 22, 25, 30, 35, 40]  # Last 7 days
+    
+    shipment_counter = 1
+    for day_offset in range(6, -1, -1):  # 6 days ago to today
+        day_date = current_date - timedelta(days=day_offset)
+        daily_count = daily_shipment_counts[day_offset]
+        
+        for i in range(daily_count):
+            shipment_id = f"SH{str(shipment_counter).zfill(3)}"
+            tracking_number = f"BC{day_date.strftime('%Y%m%d')}{str(i+1).zfill(3)}"
+            
+            # Determine status based on day (older shipments more likely to be delivered)
+            if day_offset >= 5:  # 5+ days old - mostly delivered
+                status_weights = [0.05, 0.05, 0.1, 0.05, 0.7, 0.05]
+            elif day_offset >= 3:  # 3-4 days old - mixed
+                status_weights = [0.1, 0.15, 0.25, 0.2, 0.25, 0.05]
+            elif day_offset >= 1:  # 1-2 days old - mostly in transit
+                status_weights = [0.15, 0.25, 0.35, 0.15, 0.05, 0.05]
+            else:  # Today - mostly pending/picked up
+                status_weights = [0.4, 0.35, 0.15, 0.05, 0.03, 0.02]
+            
+            status = random.choices(statuses, weights=status_weights)[0]
+            
+            # Generate realistic sender/receiver data
+            sender_city = random.choice(cities)
+            receiver_city = random.choice([c for c in cities if c != sender_city])
+            service_type = random.choice(service_types)
+            weight = round(random.uniform(0.5, 10.0), 1)
+            cost = round(weight * random.uniform(80, 150) + random.uniform(50, 200), 2)
+            
+            # Create shipment with realistic timestamps
+            created_at = (day_date + timedelta(hours=random.randint(8, 18), minutes=random.randint(0, 59))).isoformat()
+            
+            shipment = {
+                "id": shipment_id,
+                "trackingNumber": tracking_number,
+                "senderName": f"Sender Company {shipment_counter}",
+                "senderPhone": f"+91-{random.randint(70,99)}{random.randint(100,999)}-{random.randint(10000,99999)}",
+                "senderAddress": f"{random.randint(100,999)} Business Park, {sender_city}",
+                "receiverName": f"Receiver Corp {shipment_counter}",
+                "receiverPhone": f"+91-{random.randint(70,99)}{random.randint(100,999)}-{random.randint(10000,99999)}",
+                "receiverAddress": f"{random.randint(100,999)} Commercial Street, {receiver_city}",
+                "packageDetails": random.choice(["Electronics", "Clothing", "Books", "Furniture", "Food Items"]),
+                "weight": weight,
+                "dimensions": {
+                    "length": random.randint(20, 80),
+                    "width": random.randint(15, 60),
+                    "height": random.randint(5, 40)
+                },
+                "serviceType": service_type,
+                "status": status,
+                "pickupDate": created_at if status != "pending" else None,
+                "estimatedDelivery": (day_date + timedelta(days=random.randint(1, 3))).isoformat(),
+                "actualDelivery": created_at if status == "delivered" else None,
+                "route": f"RT{random.randint(1000000000, 9999999999)}" if status in ["in-transit", "out-for-delivery", "delivered"] else None,
+                "hubId": f"HUB{str(random.randint(1, 9)).zfill(3)}",
+                "events": [
+                    {
+                        "id": f"EV{shipment_counter}",
+                        "timestamp": created_at,
+                        "status": status,
+                        "location": f"{sender_city} Hub",
+                        "description": f"Shipment {status.replace('-', ' ')}"
+                    }
+                ],
+                "cost": cost,
+                "createdAt": created_at,
+                "updatedAt": created_at
+            }
+            
+            shipments_db[shipment_id] = shipment
+            shipment_counter += 1
+    
+    print(f"✅ Generated {len(shipments_db)} dynamic shipments over 7 days")
 
 def initialize_test_data():
     """Initialize realistic hubs and drivers from the same data as realistic generator"""
@@ -885,27 +1280,59 @@ def initialize_test_data():
                 "updatedAt": current_time
             })
         
+        # Add an admin user
+        admin_user = {
+            "id": "USR000",
+            "name": "Admin User",
+            "email": "admin@bluecart.com",
+            "phone": "+91-98765-43210",
+            "role": "admin",
+            "status": "active",
+            "createdAt": current_time,
+            "updatedAt": current_time
+        }
+        test_users.append(admin_user)
+        
         for user in test_users:
             users_db[user["id"]] = user
             
-        print(f"✅ Initialized {len(test_users)} test users/drivers")
+        print(f"✅ Initialized {len(test_users)} test users/drivers (including admin)")
     
-    # Initialize some test shipments
-    if not shipments_db:
+    # Generate dynamic 7-day test data
+    generate_dynamic_test_data()
+    
+    # Initialize some test shipments with proper schema (keeping for fallback)
+    if False:  # Disabled - using dynamic data instead
         test_shipments = [
             {
                 "id": "SH001",
                 "trackingNumber": "BC2024010001",
                 "senderName": "Tech Solutions Pvt Ltd",
                 "senderPhone": "+91-22-98765432",
-                "recipientName": "Global Electronics",
-                "recipientPhone": "+91-80-87654321", 
-                "pickupAddress": "Mumbai, Maharashtra",
-                "deliveryAddress": "Bangalore, Karnataka",
+                "senderAddress": "123 Tech Park, Mumbai, Maharashtra 400001",
+                "receiverName": "Global Electronics",
+                "receiverPhone": "+91-80-87654321", 
+                "receiverAddress": "456 Electronic City, Bangalore, Karnataka 560100",
+                "packageDetails": "Laptop computers and accessories",
                 "weight": 2.5,
+                "dimensions": {"length": 40, "width": 30, "height": 10},
                 "serviceType": "express",
                 "status": "pending",
+                "pickupDate": current_time,
                 "estimatedDelivery": current_time,
+                "actualDelivery": None,
+                "route": None,
+                "hubId": "HUB001",
+                "events": [
+                    {
+                        "id": "EV001",
+                        "timestamp": current_time,
+                        "status": "pending",
+                        "location": "Mumbai Hub",
+                        "description": "Shipment created and pending pickup"
+                    }
+                ],
+                "cost": 450.0,
                 "createdAt": current_time,
                 "updatedAt": current_time
             },
@@ -914,14 +1341,30 @@ def initialize_test_data():
                 "trackingNumber": "BC2024010002",
                 "senderName": "Fashion Hub",
                 "senderPhone": "+91-11-98765433",
-                "recipientName": "Style Store",
-                "recipientPhone": "+91-22-87654322",
-                "pickupAddress": "Delhi, Delhi", 
-                "deliveryAddress": "Mumbai, Maharashtra",
+                "senderAddress": "789 Fashion Street, Delhi, Delhi 110001",
+                "receiverName": "Style Store",
+                "receiverPhone": "+91-22-87654322",
+                "receiverAddress": "321 Style Plaza, Mumbai, Maharashtra 400002",
+                "packageDetails": "Designer clothing and accessories",
                 "weight": 1.8,
+                "dimensions": {"length": 50, "width": 40, "height": 15},
                 "serviceType": "standard",
                 "status": "pending",
+                "pickupDate": current_time,
                 "estimatedDelivery": current_time,
+                "actualDelivery": None,
+                "route": None,
+                "hubId": "HUB002",
+                "events": [
+                    {
+                        "id": "EV002",
+                        "timestamp": current_time,
+                        "status": "pending",
+                        "location": "Delhi Hub",
+                        "description": "Shipment created and pending pickup"
+                    }
+                ],
+                "cost": 280.0,
                 "createdAt": current_time,
                 "updatedAt": current_time
             },
@@ -930,14 +1373,37 @@ def initialize_test_data():
                 "trackingNumber": "BC2024010003", 
                 "senderName": "Book Palace",
                 "senderPhone": "+91-80-98765434",
-                "recipientName": "Knowledge Center",
-                "recipientPhone": "+91-11-87654323",
-                "pickupAddress": "Bangalore, Karnataka",
-                "deliveryAddress": "Delhi, Delhi",
+                "senderAddress": "654 Book Avenue, Bangalore, Karnataka 560001",
+                "receiverName": "Knowledge Center",
+                "receiverPhone": "+91-11-87654323",
+                "receiverAddress": "987 Learning Street, Delhi, Delhi 110002",
+                "packageDetails": "Educational books and stationery",
                 "weight": 3.2,
+                "dimensions": {"length": 35, "width": 25, "height": 20},
                 "serviceType": "express",
-                "status": "pending", 
+                "status": "in-transit",
+                "pickupDate": current_time,
                 "estimatedDelivery": current_time,
+                "actualDelivery": None,
+                "route": "RT1759918067",
+                "hubId": "HUB003",
+                "events": [
+                    {
+                        "id": "EV003",
+                        "timestamp": current_time,
+                        "status": "pending",
+                        "location": "Bangalore Hub",
+                        "description": "Shipment created and pending pickup"
+                    },
+                    {
+                        "id": "EV004",
+                        "timestamp": current_time,
+                        "status": "in-transit",
+                        "location": "In Transit",
+                        "description": "Package picked up and in transit"
+                    }
+                ],
+                "cost": 380.0,
                 "createdAt": current_time,
                 "updatedAt": current_time
             }
@@ -947,6 +1413,47 @@ def initialize_test_data():
             shipments_db[shipment["id"]] = shipment
             
         print(f"✅ Initialized {len(test_shipments)} test shipments")
+    
+    # Initialize test sessions for admin user
+    if not sessions_db:
+        current_time = datetime.now().isoformat()
+        test_sessions = [
+            {
+                "id": "SES001",
+                "user_id": "USR000",
+                "device": "Chrome Browser - Windows",
+                "ip_address": "192.168.1.100",
+                "location": "Mumbai, India",
+                "last_activity": current_time,
+                "created_at": current_time,
+                "is_current": True
+            },
+            {
+                "id": "SES002", 
+                "user_id": "USR000",
+                "device": "Mobile App - Android",
+                "ip_address": "192.168.1.101",
+                "location": "Mumbai, India",
+                "last_activity": (datetime.now() - timedelta(hours=2)).isoformat(),
+                "created_at": (datetime.now() - timedelta(days=1)).isoformat(),
+                "is_current": False
+            },
+            {
+                "id": "SES003",
+                "user_id": "USR000", 
+                "device": "Safari Browser - MacOS",
+                "ip_address": "192.168.1.102",
+                "location": "Delhi, India",
+                "last_activity": (datetime.now() - timedelta(hours=8)).isoformat(),
+                "created_at": (datetime.now() - timedelta(days=3)).isoformat(),
+                "is_current": False
+            }
+        ]
+        
+        for session in test_sessions:
+            sessions_db[session["id"]] = session
+            
+        print(f"✅ Initialized {len(test_sessions)} test sessions")
 
 if __name__ == "__main__":
     print("🚀 Starting BlueCart ERP FastAPI Backend...")
