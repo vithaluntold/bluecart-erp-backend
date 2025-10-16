@@ -3,15 +3,17 @@ version: "1"
 services:
   # FastAPI Backend Web Service
   - type: web
-    name: bluecart-backend
+    name: bluecart-erp-backend
     env: python
     plan: free
     region: oregon
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main_postgres.py"
+    startCommand: "uvicorn main_postgres:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: DATABASE_URL
-        value: "postgresql://bluecart_database_user:k4d6Bn9Q2Jo0uJ2UbMkBVJwdzGzqZ8YA@dpg-d3id75ripnbc73e3adfg-a/bluecart_database"
+        value: "postgresql://bluecart_admin:Suftlt22razRiPN9143GEpIt0WJdfKWe@dpg-d3ijvkje5dus73977f1g-a/bluecart_erp"
       - key: ENVIRONMENT
         value: "production"
+      - key: PYTHON_VERSION
+        value: "3.12.0"
     healthCheckPath: "/health"

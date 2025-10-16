@@ -1,1 +1,1 @@
-web: python main_postgres.py
+web: uvicorn main_postgres:app --host 0.0.0.0 --port $PORT
