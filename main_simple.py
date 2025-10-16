@@ -6,6 +6,7 @@ import uvicorn
 from pydantic import BaseModel, Field
 import random
 import string
+import bcrypt
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -29,6 +30,17 @@ app.add_middleware(
 shipments_db: Dict[str, Dict] = {}
 hubs_db: Dict[str, Dict] = {}
 users_db: Dict[str, Dict] = {}
+
+# Password Hashing Helper Functions
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash"""
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 # Initialize with sample data
 def initialize_sample_data():
@@ -106,8 +118,12 @@ def initialize_sample_data():
         }
     ]
     
+    # Hash passwords before storing
     for user in sample_users:
+        plain_password = user["password"]
+        user["password"] = hash_password(plain_password)
         users_db[user["id"]] = user
+        print(f"✅ Created user: {user['email']} (password encrypted)")
     
     # Sample Hubs
     sample_hubs = [
@@ -507,8 +523,8 @@ async def login(credentials: LoginRequest):
                 detail="Invalid email or password"
             )
         
-        # Check password (in production, use proper password hashing)
-        if user["password"] != credentials.password:
+        # Verify password using bcrypt
+        if not verify_password(credentials.password, user["password"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
@@ -607,6 +623,11 @@ async def update_user(user_id: str, updates: UserUpdate):
         
         # Update only provided fields
         update_data = updates.dict(exclude_unset=True)
+        
+        # Hash password if it's being updated
+        if "password" in update_data and update_data["password"]:
+            update_data["password"] = hash_password(update_data["password"])
+            print(f"🔐 Password encrypted for user: {user_id}")
         
         for key, value in update_data.items():
             if value is not None:
