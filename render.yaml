@@ -21,7 +21,7 @@ services:
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "30"
       - key: CORS_ORIGINS
-        value: '["http://localhost:3000","https://*.onrender.com"]'
+        value: '["http://localhost:3000","https://bluecart-erp-frontend.onrender.com","https://*.onrender.com"]'
       - key: ENVIRONMENT
         value: "production"
       - key: PROJECT_NAME
