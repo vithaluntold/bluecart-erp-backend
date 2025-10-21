@@ -11,7 +11,9 @@ services:
     startCommand: "uvicorn main_postgres:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: DATABASE_URL
-        value: "postgresql://bluecart_admin:Suftlt22razRiPN9143GEpIt0WJdfKWe@dpg-d3ijvkje5dus73977f1g-a.oregon-postgres.render.com/bluecart_erp"
+        fromDatabase:
+          name: bluecart-erp-db
+          property: connectionString
       - key: ENVIRONMENT
         value: "production"
       - key: PYTHON_VERSION
