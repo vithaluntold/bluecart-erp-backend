@@ -183,7 +183,7 @@ async def login(credentials: LoginCredentials):
         
         # Get user by email
         cur.execute(
-            "SELECT id, username, email, password, full_name, phone, role, created_at FROM users WHERE email = %s",
+            "SELECT id, username, email, password_hash, full_name, phone, role, created_at FROM users WHERE email = %s",
             (credentials.email,)
         )
         user = cur.fetchone()
@@ -198,7 +198,7 @@ async def login(credentials: LoginCredentials):
             )
         
         # Verify password
-        if not verify_password(credentials.password, user['password']):
+        if not verify_password(credentials.password, user['password_hash']):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
