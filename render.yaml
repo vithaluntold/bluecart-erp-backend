@@ -14,8 +14,26 @@ services:
         fromDatabase:
           name: bluecart-erp-db
           property: connectionString
+      - key: SECRET_KEY
+        value: "bluecart-super-secret-jwt-key-32-chars-minimum-length-required-for-security"
+      - key: ALGORITHM
+        value: "HS256"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: CORS_ORIGINS
+        value: '["http://localhost:3000","https://*.onrender.com"]'
       - key: ENVIRONMENT
         value: "production"
+      - key: PROJECT_NAME
+        value: "BlueCart ERP Backend"
+      - key: VERSION
+        value: "1.0.0"
+      - key: API_V1_STR
+        value: "/api/v1"
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: "INFO"
       - key: PYTHON_VERSION
         value: "3.12.0"
     healthCheckPath: "/health"

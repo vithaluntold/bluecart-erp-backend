@@ -10,12 +10,18 @@ from pydantic import BaseModel, Field, EmailStr
 import uvicorn
 import bcrypt
 import os
+import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import SimpleConnectionPool
 
-# Database Configuration
+# Environment Configuration
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://bluecart_admin:Suftlt22razRiPN9143GEpIt0WJdfKWe@dpg-d3ijvkje5dus73977f1g-a.oregon-postgres.render.com/bluecart_erp')
+CORS_ORIGINS = json.loads(os.getenv('CORS_ORIGINS', '["http://localhost:3000","https://*.onrender.com"]'))
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+PROJECT_NAME = os.getenv('PROJECT_NAME', 'BlueCart ERP Backend')
+VERSION = os.getenv('VERSION', '2.0.0')
+DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
 
 # Initialize connection pool
 db_pool = None
@@ -60,17 +66,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="BlueCart ERP API",
+    title=PROJECT_NAME,
     description="Logistics and shipment management system with PostgreSQL",
-    version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    version=VERSION,
+    docs_url="/docs" if DEBUG else None,
+    redoc_url="/redoc" if DEBUG else None
 )
 
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
