@@ -894,7 +894,12 @@ async def get_shipments(
             shipment_dict = dict(shipment)
             if 'additional_data' in shipment_dict and shipment_dict['additional_data']:
                 try:
-                    additional_data = json.loads(shipment_dict['additional_data'])
+                    # additional_data is already a dict from JSONB, no need to parse JSON
+                    additional_data = shipment_dict['additional_data']
+                    if isinstance(additional_data, str):
+                        # If it's a string, parse it
+                        additional_data = json.loads(additional_data)
+                    
                     # Merge additional data into the main object
                     shipment_dict.update(additional_data)
                     # Remove the raw additional_data field
@@ -935,7 +940,12 @@ async def get_shipment(shipment_id: int):
         shipment_dict = dict(shipment)
         if 'additional_data' in shipment_dict and shipment_dict['additional_data']:
             try:
-                additional_data = json.loads(shipment_dict['additional_data'])
+                # additional_data is already a dict from JSONB, no need to parse JSON
+                additional_data = shipment_dict['additional_data']
+                if isinstance(additional_data, str):
+                    # If it's a string, parse it
+                    additional_data = json.loads(additional_data)
+                
                 # Merge additional data into the main object
                 shipment_dict.update(additional_data)
                 # Remove the raw additional_data field
