@@ -973,7 +973,7 @@ class RouteCreate(BaseModel):
     origin_hub_id: int
     destination_hub_id: int
     distance_km: float
-    estimated_time_hours: Optional[float] = None
+    estimated_hours: Optional[float] = None
     status: str = "active"
 
 @app.post("/api/routes", tags=["Routes"])
@@ -993,7 +993,7 @@ async def create_route(route: RouteCreate):
         
         cur.execute("""
             INSERT INTO routes 
-            (name, origin_hub_id, destination_hub_id, distance_km, estimated_time_hours, status)
+            (name, origin_hub_id, destination_hub_id, distance_km, estimated_hours, status)
             VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING *
         """, (
@@ -1001,7 +1001,7 @@ async def create_route(route: RouteCreate):
             route.origin_hub_id,
             route.destination_hub_id,
             route.distance_km,
-            route.estimated_time_hours,
+            route.estimated_hours,
             route.status
         ))
         
