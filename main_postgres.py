@@ -917,6 +917,60 @@ async def get_shipments(
             detail=f"Error fetching shipments: {str(e)}"
         )
 
+@app.get("/api/shipments/{shipment_id}/debug", tags=["Debug"])
+async def debug_shipment(shipment_id: int):
+    """Debug endpoint to see what's happening with additional_data merging"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("SELECT * FROM shipments WHERE id = %s", (shipment_id,))
+        shipment = cur.fetchone()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        if not shipment:
+            return {"error": f"Shipment {shipment_id} not found"}
+        
+        # Debug information
+        debug_info = {
+            "raw_shipment_keys": list(shipment.keys()),
+            "has_additional_data": 'additional_data' in shipment,
+            "additional_data_type": str(type(shipment.get('additional_data'))),
+            "additional_data_content": shipment.get('additional_data'),
+            "additional_data_is_truthy": bool(shipment.get('additional_data'))
+        }
+        
+        # Try the merging process
+        shipment_dict = dict(shipment)
+        if 'additional_data' in shipment_dict and shipment_dict['additional_data']:
+            additional_data = shipment_dict['additional_data']
+            
+            debug_info["merge_attempt"] = True
+            debug_info["additional_data_before_merge"] = additional_data
+            
+            if isinstance(additional_data, str):
+                try:
+                    additional_data = json.loads(additional_data)
+                    debug_info["json_parsed"] = True
+                except:
+                    debug_info["json_parse_error"] = True
+            
+            if isinstance(additional_data, dict):
+                shipment_dict.update(additional_data)
+                del shipment_dict['additional_data']
+                debug_info["merge_successful"] = True
+                debug_info["final_keys"] = list(shipment_dict.keys())
+        else:
+            debug_info["merge_attempt"] = False
+            debug_info["reason"] = "No additional_data or additional_data is falsy"
+        
+        return debug_info
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/shipments/{shipment_id}", tags=["Shipments"])
 async def get_shipment(shipment_id: int):
     """Get shipment by ID"""
