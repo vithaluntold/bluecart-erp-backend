@@ -942,16 +942,24 @@ async def get_shipment(shipment_id: int):
             try:
                 # additional_data is already a dict from JSONB, no need to parse JSON
                 additional_data = shipment_dict['additional_data']
+                print(f"DEBUG: additional_data type: {type(additional_data)}")
+                print(f"DEBUG: additional_data content: {additional_data}")
+                
                 if isinstance(additional_data, str):
                     # If it's a string, parse it
                     additional_data = json.loads(additional_data)
+                    print("DEBUG: Parsed JSON string to dict")
                 
                 # Merge additional data into the main object
                 shipment_dict.update(additional_data)
+                print(f"DEBUG: After merge, shipment_dict keys: {list(shipment_dict.keys())}")
+                
                 # Remove the raw additional_data field
                 del shipment_dict['additional_data']
-            except (json.JSONDecodeError, TypeError):
+                print("DEBUG: Removed additional_data field")
+            except (json.JSONDecodeError, TypeError) as e:
                 # If JSON parsing fails, just return basic data
+                print(f"DEBUG: Exception in merging: {e}")
                 pass
         
         return shipment_dict
