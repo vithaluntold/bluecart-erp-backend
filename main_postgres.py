@@ -137,6 +137,65 @@ class Shipment(BaseModel):
 async def startup():
     """Initialize database connection on startup"""
     init_db_pool()
+    
+    # Create system_settings table if it doesn't exist
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        # Create system_settings table
+        create_table_sql = """
+        CREATE TABLE IF NOT EXISTS system_settings (
+            id SERIAL PRIMARY KEY,
+            setting_key VARCHAR(100) UNIQUE NOT NULL,
+            setting_value TEXT NOT NULL,
+            setting_type VARCHAR(20) DEFAULT 'string',
+            category VARCHAR(50) NOT NULL,
+            description TEXT,
+            is_editable BOOLEAN DEFAULT TRUE,
+            is_sensitive BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        
+        cur.execute(create_table_sql)
+        
+        # Insert default settings if table is empty
+        cur.execute("SELECT COUNT(*) FROM system_settings")
+        count = cur.fetchone()[0]
+        
+        if count == 0:
+            default_settings = [
+                ('timezone', 'UTC', 'string', 'system', 'Default system timezone'),
+                ('language', 'en', 'string', 'system', 'Default system language'),
+                ('maintenance_mode', 'false', 'boolean', 'system', 'System maintenance mode'),
+                ('email_notifications', 'true', 'boolean', 'notifications', 'Enable email notifications'),
+                ('sms_notifications', 'true', 'boolean', 'notifications', 'Enable SMS notifications'),
+                ('push_notifications', 'false', 'boolean', 'notifications', 'Enable push notifications'),
+                ('delivery_updates', 'true', 'boolean', 'notifications', 'Enable delivery update notifications'),
+                ('hub_updates', 'true', 'boolean', 'notifications', 'Enable hub update notifications'),
+            ]
+            
+            insert_sql = """
+            INSERT INTO system_settings (setting_key, setting_value, setting_type, category, description) 
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            
+            cur.executemany(insert_sql, default_settings)
+            print(f"✅ Inserted {len(default_settings)} default settings")
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        print("✅ system_settings table ready")
+        
+    except Exception as e:
+        print(f"❌ Error setting up system_settings table: {e}")
+        if conn:
+            conn.rollback()
+            db_pool.putconn(conn)
+    
     print("🚀 BlueCart ERP Backend started")
 
 @app.on_event("shutdown")
@@ -978,16 +1037,51 @@ async def update_shipment(shipment_id: int, updates: Dict[str, Any]):
         conn = db_pool.getconn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         
-        # Build dynamic update query
+        # Get current shipment to merge additional_data
+        cur.execute("SELECT *, additional_data FROM shipments WHERE id = %s", (shipment_id,))
+        current_shipment = cur.fetchone()
+        
+        if not current_shipment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Shipment {shipment_id} not found"
+            )
+        
+        # Separate direct table fields from additional_data fields
+        direct_fields = ['status', 'current_hub_id', 'destination_hub_id', 'route_id', 'priority', 'weight', 'cargo_type']
+        additional_data_fields = ['paymentStatus', 'paymentMethod', 'senderName', 'receiverName', 'senderPhone', 'receiverPhone', 'senderAddress', 'receiverAddress']
+        
+        # Build update for direct fields
+        direct_updates = {}
+        additional_updates = {}
+        
+        for key, value in updates.items():
+            if key in direct_fields:
+                direct_updates[key] = value
+            elif key in additional_data_fields:
+                additional_updates[key] = value
+        
+        # Get current additional_data
+        current_additional = current_shipment.get('additional_data', {}) or {}
+        if isinstance(current_additional, str):
+            current_additional = json.loads(current_additional)
+        
+        # Merge additional_data updates
+        current_additional.update(additional_updates)
+        
+        # Build update query
         update_fields = []
         values = []
         
-        allowed_fields = ['status', 'current_hub_id', 'destination_hub_id', 'route_id', 'priority', 'weight', 'cargo_type']
+        # Add direct field updates
+        for key, value in direct_updates.items():
+            update_fields.append(f"{key} = %s")
+            values.append(value)
         
-        for key, value in updates.items():
-            if key in allowed_fields:
-                update_fields.append(f"{key} = %s")
-                values.append(value)
+        # Add additional_data update if we have additional updates
+        if additional_updates:
+            update_fields.append("additional_data = %s")
+            values.append(json.dumps(current_additional))
         
         if not update_fields:
             raise HTTPException(
@@ -1007,18 +1101,21 @@ async def update_shipment(shipment_id: int, updates: Dict[str, Any]):
         cur.execute(query, values)
         updated_shipment = cur.fetchone()
         
-        if not updated_shipment:
-            conn.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Shipment {shipment_id} not found"
-            )
-        
         conn.commit()
         cur.close()
         db_pool.putconn(conn)
         
-        return updated_shipment
+        # Process the response to merge additional_data
+        shipment_dict = dict(updated_shipment)
+        if 'additional_data' in shipment_dict and shipment_dict['additional_data'] is not None:
+            additional_data = shipment_dict['additional_data']
+            if isinstance(additional_data, str):
+                additional_data = json.loads(additional_data)
+            if isinstance(additional_data, dict):
+                shipment_dict.update(additional_data)
+                del shipment_dict['additional_data']
+        
+        return shipment_dict
         
     except HTTPException:
         raise
@@ -1061,6 +1158,61 @@ async def delete_shipment(shipment_id: int):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting shipment: {str(e)}"
+        )
+
+# ==================== USER PASSWORD UPDATE ====================
+
+class PasswordUpdate(BaseModel):
+    current_password: str
+    new_password: str
+
+@app.put("/api/users/{user_id}/password", tags=["Users"])
+async def update_user_password(user_id: int, password_data: PasswordUpdate):
+    """Update user password"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get current user with password hash
+        cur.execute("SELECT id, email, password_hash FROM users WHERE id = %s", (user_id,))
+        user = cur.fetchone()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found"
+            )
+        
+        # Verify current password
+        if not bcrypt.checkpw(password_data.current_password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+        
+        # Hash new password
+        new_password_hash = bcrypt.hashpw(password_data.new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Update password
+        cur.execute(
+            "UPDATE users SET password_hash = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+            (new_password_hash, user_id)
+        )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"message": "Password updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating password: {str(e)}"
         )
 
 # ==================== ROUTES ====================
