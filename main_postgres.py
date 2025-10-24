@@ -1278,6 +1278,84 @@ async def delete_route(route_id: int):
             detail=f"Error deleting route: {str(e)}"
         )
 
+# ==================== SETTINGS ENDPOINTS ====================
+
+@app.get("/api/settings")
+def get_settings():
+    """Get all system settings"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        cur.execute("""
+            SELECT setting_key, setting_value, setting_type, category 
+            FROM system_settings 
+            ORDER BY category, setting_key
+        """)
+        
+        settings = []
+        for row in cur.fetchall():
+            settings.append({
+                "setting_key": row[0],
+                "setting_value": row[1],
+                "setting_type": row[2],
+                "category": row[3]
+            })
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"settings": settings}
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching settings: {str(e)}"
+        )
+
+@app.post("/api/settings")
+def save_settings(settings_data: dict):
+    """Save system settings"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        # Clear existing settings first
+        cur.execute("DELETE FROM system_settings")
+        
+        # Insert new settings
+        for category, category_settings in settings_data.items():
+            if isinstance(category_settings, dict):
+                for key, value in category_settings.items():
+                    setting_type = "string"
+                    if isinstance(value, bool):
+                        setting_type = "boolean"
+                        value = str(value).lower()
+                    elif isinstance(value, (int, float)):
+                        setting_type = "number"
+                        value = str(value)
+                    
+                    cur.execute("""
+                        INSERT INTO system_settings (setting_key, setting_value, setting_type, category) 
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (setting_key) 
+                        DO UPDATE SET setting_value = %s, setting_type = %s, category = %s
+                    """, (key, str(value), setting_type, category, str(value), setting_type, category))
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"message": "Settings saved successfully"}
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving settings: {str(e)}"
+        )
+
 # ==================== RUN SERVER ====================
 
 if __name__ == "__main__":
