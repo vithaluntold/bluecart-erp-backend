@@ -9,6 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, EmailStr
 import uvicorn
 import bcrypt
+import json
 import os
 import json
 import psycopg2
@@ -764,24 +765,74 @@ async def create_shipment(shipment: ShipmentCreate):
         if priority not in valid_priorities:
             priority = 'normal'
         
-        # Insert shipment
-        cur.execute("""
-            INSERT INTO shipments 
-            (tracking_number, cargo_type, weight, weight_unit, priority, status, 
-             current_hub_id, destination_hub_id, route_id, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            RETURNING *
-        """, (
-            tracking_number,
-            cargo_type[:255],  # Limit to 255 chars
-            weight,
-            shipment.weight_unit,
-            priority,
-            'pending',
-            shipment.current_hub_id,
-            shipment.destination_hub_id,
-            shipment.route_id
-        ))
+        # Prepare additional data as JSON for future extension
+        additional_data = {
+            'senderName': shipment.senderName,
+            'senderPhone': shipment.senderPhone,
+            'senderAddress': shipment.senderAddress,
+            'senderCity': shipment.senderCity,
+            'senderState': shipment.senderState,
+            'senderPincode': shipment.senderPincode,
+            'receiverName': shipment.receiverName,
+            'receiverPhone': shipment.receiverPhone,
+            'receiverAddress': shipment.receiverAddress,
+            'receiverCity': shipment.receiverCity,
+            'receiverState': shipment.receiverState,
+            'receiverPincode': shipment.receiverPincode,
+            'packageType': shipment.packageType,
+            'dimensions': shipment.dimensions,
+            'serviceType': shipment.serviceType,
+            'cost': shipment.cost,
+        }
+        
+        # Add additional_data column if it doesn't exist
+        try:
+            cur.execute("ALTER TABLE shipments ADD COLUMN IF NOT EXISTS additional_data JSONB")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # If column already exists or other error, continue
+        
+        has_additional_data_column = True  # Assume it exists now
+        
+        if has_additional_data_column:
+            # Insert with additional_data column
+            cur.execute("""
+                INSERT INTO shipments 
+                (tracking_number, cargo_type, weight, weight_unit, priority, status, 
+                 current_hub_id, destination_hub_id, route_id, additional_data, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING *
+            """, (
+                tracking_number,
+                cargo_type[:255],  # Limit to 255 chars
+                weight,
+                shipment.weight_unit or 'kg',
+                priority,
+                'pending',
+                shipment.current_hub_id,
+                shipment.destination_hub_id,
+                shipment.route_id,
+                json.dumps(additional_data)
+            ))
+        else:
+            # Insert basic shipment without additional_data
+            cur.execute("""
+                INSERT INTO shipments 
+                (tracking_number, cargo_type, weight, weight_unit, priority, status, 
+                 current_hub_id, destination_hub_id, route_id, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING *
+            """, (
+                tracking_number,
+                cargo_type[:255],  # Limit to 255 chars
+                weight,
+                shipment.weight_unit or 'kg',
+                priority,
+                'pending',
+                shipment.current_hub_id,
+                shipment.destination_hub_id,
+                shipment.route_id
+            ))
         
         created_shipment = cur.fetchone()
         
@@ -837,7 +888,23 @@ async def get_shipments(
         cur.close()
         db_pool.putconn(conn)
         
-        return shipments
+        # Process each shipment to merge additional_data if present
+        processed_shipments = []
+        for shipment in shipments:
+            shipment_dict = dict(shipment)
+            if 'additional_data' in shipment_dict and shipment_dict['additional_data']:
+                try:
+                    additional_data = json.loads(shipment_dict['additional_data'])
+                    # Merge additional data into the main object
+                    shipment_dict.update(additional_data)
+                    # Remove the raw additional_data field
+                    del shipment_dict['additional_data']
+                except (json.JSONDecodeError, TypeError):
+                    # If JSON parsing fails, just return basic data
+                    pass
+            processed_shipments.append(shipment_dict)
+        
+        return processed_shipments
         
     except Exception as e:
         raise HTTPException(
@@ -864,7 +931,20 @@ async def get_shipment(shipment_id: int):
                 detail=f"Shipment {shipment_id} not found"
             )
         
-        return shipment
+        # Convert to dict and merge additional_data if present
+        shipment_dict = dict(shipment)
+        if 'additional_data' in shipment_dict and shipment_dict['additional_data']:
+            try:
+                additional_data = json.loads(shipment_dict['additional_data'])
+                # Merge additional data into the main object
+                shipment_dict.update(additional_data)
+                # Remove the raw additional_data field
+                del shipment_dict['additional_data']
+            except (json.JSONDecodeError, TypeError):
+                # If JSON parsing fails, just return basic data
+                pass
+        
+        return shipment_dict
         
     except HTTPException:
         raise
