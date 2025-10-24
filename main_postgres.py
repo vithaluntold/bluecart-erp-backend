@@ -231,6 +231,65 @@ async def login(credentials: LoginCredentials):
 
 # ==================== USER MANAGEMENT ====================
 
+class UserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    role: str = "user"
+
+@app.post("/api/users", response_model=UserResponse, tags=["Users"])
+async def create_user(user: UserCreate):
+    """Create a new user with hashed password"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Check if email already exists
+        cur.execute("SELECT id FROM users WHERE email = %s", (user.email,))
+        if cur.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        
+        # Hash password
+        hashed_password = hash_password(user.password)
+        
+        # Insert new user
+        cur.execute("""
+            INSERT INTO users 
+            (username, email, password_hash, full_name, phone, role, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            RETURNING id, username, email, full_name, phone, role, created_at
+        """, (
+            user.username,
+            user.email,
+            hashed_password,
+            user.full_name,
+            user.phone,
+            user.role
+        ))
+        
+        created_user = cur.fetchone()
+        conn.commit()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return created_user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating user: {str(e)}"
+        )
+
 @app.get("/api/users", response_model=List[UserResponse], tags=["Users"])
 async def get_users():
     """Get all users (without passwords)"""
@@ -355,6 +414,39 @@ async def update_user(user_id: int, update_data: UserUpdate):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating user: {str(e)}"
+        )
+
+@app.delete("/api/users/{user_id}", tags=["Users"])
+async def delete_user(user_id: int):
+    """Delete a user"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        cur.execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,))
+        deleted = cur.fetchone()
+        
+        if not deleted:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"message": f"User {user_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting user: {str(e)}"
         )
 
 # ==================== HUBS ====================
@@ -759,6 +851,221 @@ async def delete_shipment(shipment_id: int):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting shipment: {str(e)}"
+        )
+
+# ==================== ROUTES ====================
+
+class RouteCreate(BaseModel):
+    name: str
+    origin_hub_id: int
+    destination_hub_id: int
+    distance_km: float
+    estimated_time_hours: Optional[float] = None
+    status: str = "active"
+
+@app.post("/api/routes", tags=["Routes"])
+async def create_route(route: RouteCreate):
+    """Create a new route between hubs"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Validate hubs exist
+        cur.execute("SELECT id FROM hubs WHERE id IN (%s, %s)", (route.origin_hub_id, route.destination_hub_id))
+        if cur.rowcount < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid origin or destination hub"
+            )
+        
+        cur.execute("""
+            INSERT INTO routes 
+            (name, origin_hub_id, destination_hub_id, distance_km, estimated_time_hours, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING *
+        """, (
+            route.name,
+            route.origin_hub_id,
+            route.destination_hub_id,
+            route.distance_km,
+            route.estimated_time_hours,
+            route.status
+        ))
+        
+        created_route = cur.fetchone()
+        conn.commit()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return created_route
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating route: {str(e)}"
+        )
+
+@app.get("/api/routes", tags=["Routes"])
+async def get_routes():
+    """Get all routes"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT r.*, 
+                   oh.name as origin_hub_name, 
+                   dh.name as destination_hub_name
+            FROM routes r
+            LEFT JOIN hubs oh ON r.origin_hub_id = oh.id
+            LEFT JOIN hubs dh ON r.destination_hub_id = dh.id
+            ORDER BY r.id
+        """)
+        routes = cur.fetchall()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return routes
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching routes: {str(e)}"
+        )
+
+@app.get("/api/routes/{route_id}", tags=["Routes"])
+async def get_route(route_id: int):
+    """Get route by ID"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT r.*, 
+                   oh.name as origin_hub_name, 
+                   dh.name as destination_hub_name
+            FROM routes r
+            LEFT JOIN hubs oh ON r.origin_hub_id = oh.id
+            LEFT JOIN hubs dh ON r.destination_hub_id = dh.id
+            WHERE r.id = %s
+        """, (route_id,))
+        route = cur.fetchone()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        if not route:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Route {route_id} not found"
+            )
+        
+        return route
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching route: {str(e)}"
+        )
+
+@app.put("/api/routes/{route_id}", tags=["Routes"])
+async def update_route(route_id: int, updates: Dict[str, Any]):
+    """Update route details"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Build dynamic update query
+        update_fields = []
+        values = []
+        
+        allowed_fields = ['name', 'origin_hub_id', 'destination_hub_id', 'distance_km', 'estimated_time_hours', 'status']
+        
+        for key, value in updates.items():
+            if key in allowed_fields:
+                update_fields.append(f"{key} = %s")
+                values.append(value)
+        
+        if not update_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid fields to update"
+            )
+        
+        values.append(route_id)
+        
+        query = f"""
+            UPDATE routes 
+            SET {', '.join(update_fields)} 
+            WHERE id = %s 
+            RETURNING *
+        """
+        
+        cur.execute(query, values)
+        updated_route = cur.fetchone()
+        
+        if not updated_route:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Route {route_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return updated_route
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating route: {str(e)}"
+        )
+
+@app.delete("/api/routes/{route_id}", tags=["Routes"])
+async def delete_route(route_id: int):
+    """Delete a route"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        cur.execute("DELETE FROM routes WHERE id = %s RETURNING id", (route_id,))
+        deleted = cur.fetchone()
+        
+        if not deleted:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Route {route_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"message": f"Route {route_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting route: {str(e)}"
         )
 
 # ==================== RUN SERVER ====================
