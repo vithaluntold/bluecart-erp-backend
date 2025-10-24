@@ -21,7 +21,7 @@ services:
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "30"
       - key: CORS_ORIGINS
-        value: '["http://localhost:3000","https://bluecart-erp-frontend.onrender.com","https://*.onrender.com"]'
+        value: '["http://localhost:3000","http://localhost:3001","https://bluecart-erp-frontend.onrender.com","https://*.onrender.com"]'
       - key: ENVIRONMENT
         value: "production"
       - key: PROJECT_NAME
@@ -34,6 +34,4 @@ services:
         value: "false"
       - key: LOG_LEVEL
         value: "INFO"
-      - key: PYTHON_VERSION
-        value: "3.12.0"
     healthCheckPath: "/health"
