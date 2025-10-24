@@ -359,6 +359,55 @@ async def update_user(user_id: int, update_data: UserUpdate):
 
 # ==================== HUBS ====================
 
+class HubCreate(BaseModel):
+    name: str
+    city: str
+    state: str
+    country: str = "India"
+    postal_code: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    status: str = "active"
+
+@app.post("/api/hubs", tags=["Hubs"])
+async def create_hub(hub: HubCreate):
+    """Create a new hub"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            INSERT INTO hubs 
+            (name, city, state, country, postal_code, latitude, longitude, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING *
+        """, (
+            hub.name,
+            hub.city,
+            hub.state,
+            hub.country,
+            hub.postal_code,
+            hub.latitude,
+            hub.longitude,
+            hub.status
+        ))
+        
+        created_hub = cur.fetchone()
+        conn.commit()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return created_hub
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating hub: {str(e)}"
+        )
+
 @app.get("/api/hubs", response_model=List[Dict[str, Any]], tags=["Hubs"])
 async def get_hubs():
     """Get all hubs"""
@@ -381,7 +430,7 @@ async def get_hubs():
         )
 
 @app.get("/api/hubs/{hub_id}", tags=["Hubs"])
-async def get_hub(hub_id: str):
+async def get_hub(hub_id: int):
     """Get hub by ID"""
     try:
         conn = db_pool.getconn()
@@ -409,7 +458,153 @@ async def get_hub(hub_id: str):
             detail=f"Error fetching hub: {str(e)}"
         )
 
+@app.put("/api/hubs/{hub_id}", tags=["Hubs"])
+async def update_hub(hub_id: int, updates: Dict[str, Any]):
+    """Update hub details"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Build dynamic update query
+        update_fields = []
+        values = []
+        
+        allowed_fields = ['name', 'city', 'state', 'country', 'postal_code', 'latitude', 'longitude', 'status']
+        
+        for key, value in updates.items():
+            if key in allowed_fields:
+                update_fields.append(f"{key} = %s")
+                values.append(value)
+        
+        if not update_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid fields to update"
+            )
+        
+        values.append(hub_id)
+        
+        query = f"""
+            UPDATE hubs 
+            SET {', '.join(update_fields)} 
+            WHERE id = %s 
+            RETURNING *
+        """
+        
+        cur.execute(query, values)
+        updated_hub = cur.fetchone()
+        
+        if not updated_hub:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Hub {hub_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return updated_hub
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating hub: {str(e)}"
+        )
+
+@app.delete("/api/hubs/{hub_id}", tags=["Hubs"])
+async def delete_hub(hub_id: int):
+    """Delete a hub"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        cur.execute("DELETE FROM hubs WHERE id = %s RETURNING id", (hub_id,))
+        deleted = cur.fetchone()
+        
+        if not deleted:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Hub {hub_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"message": f"Hub {hub_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting hub: {str(e)}"
+        )
+
 # ==================== SHIPMENTS ====================
+
+class ShipmentCreate(BaseModel):
+    cargo_type: str
+    weight: float
+    weight_unit: str = "kg"
+    priority: str = "standard"
+    current_hub_id: Optional[int] = None
+    destination_hub_id: Optional[int] = None
+    route_id: Optional[int] = None
+
+@app.post("/api/shipments", tags=["Shipments"])
+async def create_shipment(shipment: ShipmentCreate):
+    """Create a new shipment"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Generate tracking number
+        import random
+        import string
+        tracking_number = f"SHIP{''.join(random.choices(string.digits, k=8))}"
+        
+        cur.execute("""
+            INSERT INTO shipments 
+            (tracking_number, cargo_type, weight, weight_unit, priority, status, current_hub_id, destination_hub_id, route_id, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING *
+        """, (
+            tracking_number,
+            shipment.cargo_type,
+            shipment.weight,
+            shipment.weight_unit,
+            shipment.priority,
+            'pending',
+            shipment.current_hub_id,
+            shipment.destination_hub_id,
+            shipment.route_id
+        ))
+        
+        created_shipment = cur.fetchone()
+        conn.commit()
+        
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return created_shipment
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating shipment: {str(e)}"
+        )
 
 @app.get("/api/shipments", response_model=List[Dict[str, Any]], tags=["Shipments"])
 async def get_shipments(
@@ -472,6 +667,98 @@ async def get_shipment(shipment_id: int):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching shipment: {str(e)}"
+        )
+
+@app.put("/api/shipments/{shipment_id}", tags=["Shipments"])
+async def update_shipment(shipment_id: int, updates: Dict[str, Any]):
+    """Update shipment status and details"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Build dynamic update query
+        update_fields = []
+        values = []
+        
+        allowed_fields = ['status', 'current_hub_id', 'destination_hub_id', 'route_id', 'priority', 'weight', 'cargo_type']
+        
+        for key, value in updates.items():
+            if key in allowed_fields:
+                update_fields.append(f"{key} = %s")
+                values.append(value)
+        
+        if not update_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid fields to update"
+            )
+        
+        values.append(shipment_id)
+        
+        query = f"""
+            UPDATE shipments 
+            SET {', '.join(update_fields)} 
+            WHERE id = %s 
+            RETURNING *
+        """
+        
+        cur.execute(query, values)
+        updated_shipment = cur.fetchone()
+        
+        if not updated_shipment:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Shipment {shipment_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return updated_shipment
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating shipment: {str(e)}"
+        )
+
+@app.delete("/api/shipments/{shipment_id}", tags=["Shipments"])
+async def delete_shipment(shipment_id: int):
+    """Delete a shipment"""
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        
+        cur.execute("DELETE FROM shipments WHERE id = %s RETURNING id", (shipment_id,))
+        deleted = cur.fetchone()
+        
+        if not deleted:
+            conn.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Shipment {shipment_id} not found"
+            )
+        
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        
+        return {"message": f"Shipment {shipment_id} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting shipment: {str(e)}"
         )
 
 # ==================== RUN SERVER ====================
