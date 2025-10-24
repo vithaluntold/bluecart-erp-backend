@@ -645,13 +645,42 @@ async def delete_hub(hub_id: int):
 # ==================== SHIPMENTS ====================
 
 class ShipmentCreate(BaseModel):
-    cargo_type: str
-    weight: float
-    weight_unit: str = "kg"
-    priority: str = "standard"
+    # Sender Information
+    senderName: Optional[str] = None
+    senderPhone: Optional[str] = None
+    senderAddress: Optional[str] = None
+    senderCity: Optional[str] = None
+    senderState: Optional[str] = None
+    senderPincode: Optional[str] = None
+    
+    # Receiver Information
+    receiverName: Optional[str] = None
+    receiverPhone: Optional[str] = None
+    receiverAddress: Optional[str] = None
+    receiverCity: Optional[str] = None
+    receiverState: Optional[str] = None
+    receiverPincode: Optional[str] = None
+    
+    # Package Details
+    packageType: Optional[str] = None
+    packageDetails: Optional[str] = None
+    packageWeight: Optional[float] = None
+    weight: Optional[float] = None
+    dimensions: Optional[Dict[str, float]] = None
+    
+    # Service and Pricing
+    serviceType: str = "standard"
+    priority: str = "normal"
+    cost: Optional[float] = None
+    
+    # Hub Information
     current_hub_id: Optional[int] = None
     destination_hub_id: Optional[int] = None
     route_id: Optional[int] = None
+    
+    # Legacy fields for backward compatibility
+    cargo_type: Optional[str] = None
+    weight_unit: str = "kg"
 
 @app.post("/api/shipments", tags=["Shipments"])
 async def create_shipment(shipment: ShipmentCreate):
@@ -665,17 +694,33 @@ async def create_shipment(shipment: ShipmentCreate):
         import string
         tracking_number = f"SHIP{''.join(random.choices(string.digits, k=8))}"
         
+        # Extract weight (support both packageWeight and weight fields)
+        weight = shipment.weight or shipment.packageWeight or 0
+        
+        # Extract cargo type from multiple possible sources
+        cargo_type = shipment.cargo_type or shipment.packageType or shipment.packageDetails or "General Cargo"
+        
+        # Map frontend serviceType to backend priority
+        priority_map = {
+            'overnight': 'urgent',
+            'express': 'high',
+            'standard': 'normal',
+            'economy': 'low'
+        }
+        priority = priority_map.get(shipment.serviceType, shipment.priority or 'normal')
+        
         cur.execute("""
             INSERT INTO shipments 
-            (tracking_number, cargo_type, weight, weight_unit, priority, status, current_hub_id, destination_hub_id, route_id, created_at)
+            (tracking_number, cargo_type, weight, weight_unit, priority, status, 
+             current_hub_id, destination_hub_id, route_id, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING *
         """, (
             tracking_number,
-            shipment.cargo_type,
-            shipment.weight,
+            cargo_type,
+            weight,
             shipment.weight_unit,
-            shipment.priority,
+            priority,
             'pending',
             shipment.current_hub_id,
             shipment.destination_hub_id,
