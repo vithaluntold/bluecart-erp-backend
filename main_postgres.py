@@ -684,21 +684,71 @@ class ShipmentCreate(BaseModel):
 
 @app.post("/api/shipments", tags=["Shipments"])
 async def create_shipment(shipment: ShipmentCreate):
-    """Create a new shipment"""
+    """Create a new shipment with comprehensive validation"""
     try:
         conn = db_pool.getconn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Validate and extract weight
+        weight = shipment.weight or shipment.packageWeight
+        if not weight or weight <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Weight must be greater than 0"
+            )
+        
+        # Validate and extract cargo type
+        cargo_type = (
+            shipment.cargo_type or 
+            shipment.packageType or 
+            shipment.packageDetails or 
+            "General Cargo"
+        )
+        
+        if not cargo_type or len(cargo_type.strip()) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Package description is required"
+            )
+        
+        # Validate hubs if provided
+        if shipment.current_hub_id:
+            cur.execute("SELECT id FROM hubs WHERE id = %s", (shipment.current_hub_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Current hub {shipment.current_hub_id} does not exist"
+                )
+        
+        if shipment.destination_hub_id:
+            cur.execute("SELECT id FROM hubs WHERE id = %s", (shipment.destination_hub_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Destination hub {shipment.destination_hub_id} does not exist"
+                )
+        
+        # Validate route if provided
+        if shipment.route_id:
+            cur.execute("SELECT id FROM routes WHERE id = %s", (shipment.route_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Route {shipment.route_id} does not exist"
+                )
         
         # Generate tracking number
         import random
         import string
         tracking_number = f"SHIP{''.join(random.choices(string.digits, k=8))}"
         
-        # Extract weight (support both packageWeight and weight fields)
-        weight = shipment.weight or shipment.packageWeight or 0
-        
-        # Extract cargo type from multiple possible sources
-        cargo_type = shipment.cargo_type or shipment.packageType or shipment.packageDetails or "General Cargo"
+        # Ensure unique tracking number
+        max_attempts = 10
+        for _ in range(max_attempts):
+            cur.execute("SELECT id FROM shipments WHERE tracking_number = %s", (tracking_number,))
+            if not cur.fetchone():
+                break
+            tracking_number = f"SHIP{''.join(random.choices(string.digits, k=8))}"
         
         # Map frontend serviceType to backend priority
         priority_map = {
@@ -709,6 +759,12 @@ async def create_shipment(shipment: ShipmentCreate):
         }
         priority = priority_map.get(shipment.serviceType, shipment.priority or 'normal')
         
+        # Validate priority
+        valid_priorities = ['urgent', 'high', 'normal', 'medium', 'low']
+        if priority not in valid_priorities:
+            priority = 'normal'
+        
+        # Insert shipment
         cur.execute("""
             INSERT INTO shipments 
             (tracking_number, cargo_type, weight, weight_unit, priority, status, 
@@ -717,7 +773,7 @@ async def create_shipment(shipment: ShipmentCreate):
             RETURNING *
         """, (
             tracking_number,
-            cargo_type,
+            cargo_type[:255],  # Limit to 255 chars
             weight,
             shipment.weight_unit,
             priority,
@@ -728,19 +784,31 @@ async def create_shipment(shipment: ShipmentCreate):
         ))
         
         created_shipment = cur.fetchone()
-        conn.commit()
         
+        if not created_shipment:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create shipment in database"
+            )
+        
+        conn.commit()
         cur.close()
         db_pool.putconn(conn)
         
+        print(f"✅ Shipment created: {tracking_number}")
         return created_shipment
         
+    except HTTPException:
+        if conn:
+            conn.rollback()
+        raise
     except Exception as e:
         if conn:
             conn.rollback()
+        print(f"❌ Error creating shipment: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error creating shipment: {str(e)}"
+            detail=f"Database error: {str(e)}"
         )
 
 @app.get("/api/shipments", response_model=List[Dict[str, Any]], tags=["Shipments"])
