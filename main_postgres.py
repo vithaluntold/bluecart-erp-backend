@@ -673,6 +673,8 @@ class ShipmentCreate(BaseModel):
     serviceType: str = "standard"
     priority: str = "normal"
     cost: Optional[float] = None
+    paymentMethod: Optional[str] = "Cash on Delivery"
+    paymentStatus: Optional[str] = "Pending"
     
     # Hub Information
     current_hub_id: Optional[int] = None
@@ -783,6 +785,8 @@ async def create_shipment(shipment: ShipmentCreate):
             'dimensions': shipment.dimensions,
             'serviceType': shipment.serviceType,
             'cost': shipment.cost,
+            'paymentMethod': getattr(shipment, 'paymentMethod', 'Cash on Delivery'),
+            'paymentStatus': getattr(shipment, 'paymentStatus', 'Pending'),
         }
         
         # Add additional_data column if it doesn't exist
