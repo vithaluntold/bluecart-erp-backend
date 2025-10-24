@@ -519,6 +519,7 @@ class HubCreate(BaseModel):
     postal_code: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    manager_id: Optional[int] = None
     status: str = "active"
 
 @app.post("/api/hubs", tags=["Hubs"])
@@ -528,10 +529,26 @@ async def create_hub(hub: HubCreate):
         conn = db_pool.getconn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         
+        # Validate manager if provided
+        if hub.manager_id:
+            cur.execute("SELECT id FROM users WHERE id = %s", (hub.manager_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Manager with ID {hub.manager_id} does not exist"
+                )
+        
+        # Add manager_id column if it doesn't exist
+        try:
+            cur.execute("ALTER TABLE hubs ADD COLUMN IF NOT EXISTS manager_id INTEGER REFERENCES users(id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # If column already exists or other error, continue
+        
         cur.execute("""
             INSERT INTO hubs 
-            (name, city, state, country, postal_code, latitude, longitude, status, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            (name, city, state, country, postal_code, latitude, longitude, manager_id, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING *
         """, (
             hub.name,
@@ -541,6 +558,7 @@ async def create_hub(hub: HubCreate):
             hub.postal_code,
             hub.latitude,
             hub.longitude,
+            hub.manager_id,
             hub.status
         ))
         
